@@ -12,6 +12,10 @@ end
 vim.opt.rtp:prepend(lazypath)
 
 require("lazy").setup({
-    spec = "strato.lazy",
-    change_detection = { notify = false }
+  spec = {
+    { import = "strato.lazy" },
+    { "nvim-lua/plenary.nvim", name = "plenary", build = false }, -- force no LuaRocks
+  },
+  rocks = { enabled = false },
+  change_detection = { notify = false },
 })
