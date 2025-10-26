@@ -1,12 +1,18 @@
 return {
     "nvim-telescope/telescope.nvim",
-
     tag = "0.1.5",
-
+    lazy = true,
     dependencies = {
         "nvim-lua/plenary.nvim"
     },
-
+    keys = {
+        { "<leader>pf", desc = "Find files" },
+        { "<C-p>", desc = "Git files" },
+        { "<leader>pws", desc = "Grep word" },
+        { "<leader>pWs", desc = "Grep WORD" },
+        { "<leader>ps", desc = "Grep string" },
+        { "<leader>vh", desc = "Help tags" },
+    },
     config = function()
         require('telescope').setup({})
 
@@ -27,4 +33,3 @@ return {
         vim.keymap.set('n', '<leader>vh', builtin.help_tags, {})
     end
 }
-

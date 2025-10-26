@@ -1,29 +1,54 @@
-function ColorMyPencils(color)
+-- Define at module level (file scope)
+local function ColorMyPencils(color)
 	color = color or "kanagawa"
 	vim.cmd.colorscheme(color)
 
-	vim.api.nvim_set_hl(0, "Normal", { bg = "none" })
-	vim.api.nvim_set_hl(0, "NormalFloat", { bg = "none" })
+	--vim.api.nvim_set_hl(0, "Normal", { bg = "none" })
+	--vim.api.nvim_set_hl(0, "NormalFloat", { bg = "none" })
 end
 
 return {
-
     {
         "rebelot/kanagawa.nvim",
         lazy = false,
+        priority = 1000,
         opts = {},
         config = function()
             ColorMyPencils()
+            -- Set up filetype-based colorscheme switching
+            vim.api.nvim_create_autocmd("FileType", {
+                pattern = "*",
+                callback = function()
+                    local ft = vim.bo.filetype
+                    if ft == "zig" then
+                        -- Load tokyonight if not loaded
+                        if not pcall(vim.cmd.colorscheme, "tokyonight-night") then
+                            vim.cmd.colorscheme("kanagawa")
+                        end
+                    elseif ft == "go" then
+                        if not pcall(vim.cmd.colorscheme, "gruvbox") then
+                            vim.cmd.colorscheme("kanagawa")
+                        end
+                    elseif ft == "rust" then
+                        if not pcall(vim.cmd.colorscheme, "brightburn") then
+                            vim.cmd.colorscheme("kanagawa")
+                        end
+                    else
+                        -- Default back to kanagawa for everything else
+                        if vim.g.colors_name ~= "kanagawa" then
+                            vim.cmd.colorscheme("kanagawa")
+                        end
+                    end
+                end,
+            })
         end
-    },
-
-    {
-        "erikbackman/brightburn.vim",
     },
 
     {
         "ellisonleao/gruvbox.nvim",
         name = "gruvbox",
+        lazy = true,
+        ft = "go",
         config = function()
             require("gruvbox").setup({
                 terminal_colors = true,
@@ -54,24 +79,26 @@ return {
 
     {
         "folke/tokyonight.nvim",
+        lazy = true,
+        ft = "zig",
         config = function()
             require("tokyonight").setup({
-                -- your configuration comes here
-                -- or leave it empty to use the default settings
-                style = "storm", -- The theme comes in three styles, `storm`, `moon`, a darker variant `night` and `day`
-                transparent = true, -- Enable this to disable setting the background color
-                terminal_colors = true, -- Configure the colors used when opening a `:terminal` in Neovim
+                style = "storm",
+                transparent = true,
+                terminal_colors = true,
                 styles = {
-                    -- Style to be applied to different syntax groups
-                    -- Value is any valid attr-list value for `:help nvim_set_hl`
                     comments = { italic = false },
                     keywords = { italic = false },
-                    -- Background styles. Can be "dark", "transparent" or "normal"
-                    sidebars = "dark", -- style for sidebars, see below
-                    floats = "dark", -- style for floating windows
+                    sidebars = "dark",
+                    floats = "dark",
                 },
             })
         end
     },
-}
 
+    {
+        "erikbackman/brightburn.vim",
+        lazy = true,
+        ft = "rust",
+    },
+}

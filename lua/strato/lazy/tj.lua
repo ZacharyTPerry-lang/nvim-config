@@ -1,5 +1,6 @@
 return {
     "tjdevries/php.nvim",
+    ft = "php",
     dependencies = {
         "nvim-treesitter/nvim-treesitter"
     },

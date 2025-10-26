@@ -4,7 +4,7 @@ local function navigate(args)
     local buffer = args.buf
 
     local wid = nil
-    local win_ids = vim.api.nvim_list_wins() -- Get all window IDs
+    local win_ids = vim.api.nvim_list_wins()
     for _, win_id in ipairs(win_ids) do
         local win_bufnr = vim.api.nvim_win_get_buf(win_id)
         if win_bufnr == buffer then
@@ -34,7 +34,15 @@ end
 return {
     {
         "mfussenegger/nvim-dap",
-        lazy = false,
+        lazy = true,
+        keys = {
+            { "<F8>", desc = "Debug: Continue" },
+            { "<F10>", desc = "Debug: Step Over" },
+            { "<F11>", desc = "Debug: Step Into" },
+            { "<F12>", desc = "Debug: Step Out" },
+            { "<leader>b", desc = "Debug: Toggle Breakpoint" },
+            { "<leader>B", desc = "Debug: Conditional Breakpoint" },
+        },
         config = function()
             local dap = require("dap")
             dap.set_log_level("DEBUG")
@@ -50,13 +58,22 @@ return {
         end
     },
 
-
     {
         "rcarriga/nvim-dap-ui",
+        lazy = true,
         dependencies = { "mfussenegger/nvim-dap", "nvim-neotest/nvim-nio" },
+        keys = {
+            { "<leader>dr", desc = "Debug: toggle repl ui" },
+            { "<leader>ds", desc = "Debug: toggle stacks ui" },
+            { "<leader>dw", desc = "Debug: toggle watches ui" },
+            { "<leader>db", desc = "Debug: toggle breakpoints ui" },
+            { "<leader>dS", desc = "Debug: toggle scopes ui" },
+            { "<leader>dc", desc = "Debug: toggle console ui" },
+        },
         config = function()
             local dap = require("dap")
             local dapui = require("dapui")
+
             local function layout(name)
                 return {
                     elements = {
@@ -67,6 +84,7 @@ return {
                     position = "right",
                 }
             end
+
             local name_to_layout = {
                 repl = { layout = layout("repl"), index = 0 },
                 stacks = { layout = layout("stacks"), index = 0 },
@@ -99,16 +117,11 @@ return {
             end
 
             vim.keymap.set("n", "<leader>dr", function() toggle_debug_ui("repl") end, { desc = "Debug: toggle repl ui" })
-            vim.keymap.set("n", "<leader>ds", function() toggle_debug_ui("stacks") end,
-                { desc = "Debug: toggle stacks ui" })
-            vim.keymap.set("n", "<leader>dw", function() toggle_debug_ui("watches") end,
-                { desc = "Debug: toggle watches ui" })
-            vim.keymap.set("n", "<leader>db", function() toggle_debug_ui("breakpoints") end,
-                { desc = "Debug: toggle breakpoints ui" })
-            vim.keymap.set("n", "<leader>dS", function() toggle_debug_ui("scopes") end,
-                { desc = "Debug: toggle scopes ui" })
-            vim.keymap.set("n", "<leader>dc", function() toggle_debug_ui("console") end,
-                { desc = "Debug: toggle console ui" })
+            vim.keymap.set("n", "<leader>ds", function() toggle_debug_ui("stacks") end, { desc = "Debug: toggle stacks ui" })
+            vim.keymap.set("n", "<leader>dw", function() toggle_debug_ui("watches") end, { desc = "Debug: toggle watches ui" })
+            vim.keymap.set("n", "<leader>db", function() toggle_debug_ui("breakpoints") end, { desc = "Debug: toggle breakpoints ui" })
+            vim.keymap.set("n", "<leader>dS", function() toggle_debug_ui("scopes") end, { desc = "Debug: toggle scopes ui" })
+            vim.keymap.set("n", "<leader>dc", function() toggle_debug_ui("console") end, { desc = "Debug: toggle console ui" })
 
             vim.api.nvim_create_autocmd("BufEnter", {
                 group = "DapGroup",
@@ -135,7 +148,7 @@ return {
 
             dap.listeners.after.event_output.dapui_config = function(_, body)
                 if body.category == "console" then
-                    dapui.eval(body.output) -- Sends stdout/stderr to Console
+                    dapui.eval(body.output)
                 end
             end
         end,
@@ -143,11 +156,13 @@ return {
 
     {
         "jay-babu/mason-nvim-dap.nvim",
+        lazy = true,
         dependencies = {
             "williamboman/mason.nvim",
             "mfussenegger/nvim-dap",
             "neovim/nvim-lspconfig",
         },
+        ft = { "go", "rust", "c", "cpp", "python" }, -- Only load for debug-capable languages
         config = function()
             require("mason-nvim-dap").setup({
                 ensure_installed = {

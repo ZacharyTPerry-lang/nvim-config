@@ -2,8 +2,6 @@ require("strato.set")
 require("strato.remap")
 require("strato.lazy_init")
 
---require("strato.core")
-
 -- Augroups and autocmds
 local augroup = vim.api.nvim_create_augroup
 local StratoGroup = augroup('Strato', {})
@@ -35,15 +33,11 @@ autocmd('TextYankPost', {
 autocmd({"BufWritePre"}, {
     group = StratoGroup,
     pattern = "*",
-    command = [[%s/\s\+$//e]],
-})
-
-vim.api.nvim_create_autocmd("User", {
-  pattern = "VeryLazy",
-  callback = function()
-    local theme = (vim.bo.filetype == "zig") and "tokyonight-night" or "kanagawa"
-    vim.cmd.colorscheme(theme)
-  end,
+    callback = function()
+        local save = vim.fn.winsaveview()
+        vim.cmd([[keeppatterns %s/\s\+$//e]])
+        vim.fn.winrestview(save)
+    end,
 })
 
 autocmd('LspAttach', {
@@ -68,3 +62,5 @@ vim.g.netrw_browse_split = 0
 vim.g.netrw_banner = 0
 vim.g.netrw_winsize = 25
 
+--the lsp profile integeration line
+require("strato.lsp.profiles").setup_command()

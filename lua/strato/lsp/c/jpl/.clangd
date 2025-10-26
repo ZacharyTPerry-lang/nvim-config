@@ -1,0 +1,90 @@
+# NVIM LSP PROFILES - jpl - TEMPLATE
+# This file is auto-generated. Manual edits will be overwritten.
+# JPL C Coding Standard compliant configuration
+
+CompileFlags:
+  Add:
+    - -Wall
+    - -Wextra
+    - -Werror
+    - -std=c99
+    - -pedantic
+    - -pedantic-errors
+    # Function complexity and size limits
+    - -Wcomplex-function
+    # No implicit declarations
+    - -Werror=implicit-function-declaration
+    - -Werror=implicit-int
+    # Strict pointer rules
+    - -Wpointer-arith
+    - -Wcast-align
+    - -Wcast-qual
+    # Enforce declarations at top
+    - -Wdeclaration-after-statement
+    # Additional safety flags
+    - -Wshadow
+    - -Wformat=2
+    - -Wuninitialized
+    - -Wlogical-op
+    - -Wduplicated-cond
+    - -Wduplicated-branches
+    - -Wnull-dereference
+    - -Wswitch-enum
+    - -Wswitch-default
+    - -Wstrict-prototypes
+    - -Wmissing-prototypes
+    - -Wwrite-strings
+    - -Winit-self
+    - -fstack-protector-strong
+    - -xc
+Diagnostics:
+  UnusedIncludes: Strict
+  MissingIncludes: Strict
+  ClangTidy:
+    Add:
+      # CERT C secure coding
+      - cert-*
+      # No dynamic memory allocation
+      - cppcoreguidelines-no-malloc
+      - cppcoreguidelines-owning-memory
+      # Readability and maintainability
+      - readability-function-size
+      - readability-identifier-naming
+      - readability-magic-numbers
+      - readability-simplify-boolean-expr
+      # Avoid recursion (detected as potential issue)
+      - misc-no-recursion
+      # Control flow restrictions
+      - cppcoreguidelines-avoid-goto
+      # Complexity limits
+      - readability-function-cognitive-complexity
+      # Additional safety checks
+      - bugprone-*
+      - clang-analyzer-*
+      - security-*
+      - performance-*
+      - hicpp-signed-bitwise
+      - hicpp-no-malloc
+    CheckOptions:
+      # Function size limits (JPL: max 60 lines)
+      readability-function-size.LineThreshold: 60
+      readability-function-size.StatementThreshold: 50
+      # Cognitive complexity limit
+      readability-function-cognitive-complexity.Threshold: 15
+      # Naming conventions
+      readability-identifier-naming.FunctionCase: lower_case
+      readability-identifier-naming.VariableCase: lower_case
+      readability-identifier-naming.ConstantCase: UPPER_CASE
+      readability-identifier-naming.MacroCase: UPPER_CASE
+      readability-identifier-naming.EnumConstantCase: UPPER_CASE
+      readability-identifier-naming.GlobalVariablePrefix: g_
+      readability-identifier-naming.StaticVariablePrefix: s_
+      # Assertions
+      bugprone-assert-side-effect.AssertMacros: "assert,c_assert,verify"
+      bugprone-assert-side-effect.CheckFunctionCalls: true
+      # Loop analysis
+      bugprone-infinite-loop.MaxLoopIterationsCount: 10000
+      # Bounds checking
+      clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling: true
+Index:
+  Background: Build

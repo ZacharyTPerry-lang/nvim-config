@@ -1,0 +1,16 @@
+# NVIM LSP PROFILES - standard - TEMPLATE
+# This file is auto-generated. Manual edits will be overwritten.
+
+CompileFlags:
+  Add:
+    - -Wall
+    - -Wextra
+    - -std=c99
+    - -pedantic
+
+Diagnostics:
+  UnusedIncludes: Strict
+  MissingIncludes: Strict
+
+Index:
+  Background: Build
