@@ -1,0 +1,22 @@
+{
+  "_comment": "NVIM LSP PROFILES - strict - TEMPLATE",
+  "options": {
+    "ghdl_analysis": [
+      "--std=08",
+      "--ieee=standard",
+      "-fexplicit",
+      "--warn-binding",
+      "--warn-reserved",
+      "--warn-library",
+      "--warn-vital-generic",
+      "--warn-delayed-checks",
+      "--warn-body",
+      "--warn-specs",
+      "--warn-runtime-error",
+      "--warn-shared",
+      "--warn-hide",
+      "--warn-unused",
+      "--workdir=work"
+    ]
+  }
+}

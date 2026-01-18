@@ -6,6 +6,15 @@ local M = {}
 local state = require('strato.local_plugin_stubs.jjplugin.state')
 local parser = require('strato.local_plugin_stubs.jjplugin.parser')
 local core = require('strato.local_plugin_stubs.jjplugin.core')
+local watcher = require('strato.local_plugin_stubs.jjplugin.watcher')
+local diff = require('strato.local_plugin_stubs.jjplugin.diff')
+
+-- Command modules
+local cmd_minor = require('strato.local_plugin_stubs.jjplugin.commands.minor')
+local cmd_freeze = require('strato.local_plugin_stubs.jjplugin.commands.freeze')
+local cmd_switch = require('strato.local_plugin_stubs.jjplugin.commands.switch')
+local cmd_tree = require('strato.local_plugin_stubs.jjplugin.commands.tree')
+local cmd_drift = require('strato.local_plugin_stubs.jjplugin.commands.drift')
 
 --
 -- User commands section
@@ -104,6 +113,114 @@ local function create_commands()
             vim.notify('jj describe failed: ' .. result.stderr, vim.log.levels.ERROR)
         end
     end, {nargs = '+', desc = 'Update current working copy description'})
+
+    vim.api.nvim_create_user_command('JJMajor', function(opts)
+        local description = opts.args
+        if description == "" then
+            vim.notify('Usage: :JJMajor <description>', vim.log.levels.ERROR)
+            return
+        end
+
+        local filepath = vim.fn.expand('%:.')
+        if filepath == "" then
+            vim.notify('No file in buffer', vim.log.levels.ERROR)
+            return
+        end
+
+        -- Get current commit
+        local commit_id = diff.get_current_commit()
+        if not commit_id then
+            vim.notify('Failed to get current commit', vim.log.levels.ERROR)
+            return
+        end
+
+        -- Create major node
+        local major_id, major_path = state.add_node(filepath, {}, {
+            description = description,
+            commit_id = commit_id,
+            is_main = nil,  -- Let state decide (first major will be main)
+        })
+
+        if not major_id then
+            vim.notify('Failed to create major node', vim.log.levels.ERROR)
+            return
+        end
+
+        -- Set as current
+        state.set_current_node(filepath, major_path)
+        state.set_anchor(filepath, commit_id)
+        state.reset_drift(filepath)
+
+        vim.notify(string.format('Created major %s: %s', major_id, description), vim.log.levels.INFO)
+    end, {nargs = '+', desc = 'Create new major version'})
+
+    vim.api.nvim_create_user_command('JJMinor', function(opts)
+        local description = opts.args
+        if description == "" then
+            vim.notify('Usage: :JJMinor <description>', vim.log.levels.ERROR)
+            return
+        end
+        cmd_minor.create_minor(description)
+    end, {nargs = '+', desc = 'Create sibling minor version'})
+
+    vim.api.nvim_create_user_command('JJFreeze', function()
+        cmd_freeze.freeze()
+    end, {desc = 'Freeze current node (make immutable)'})
+
+    vim.api.nvim_create_user_command('JJUnfreeze', function()
+        cmd_freeze.unfreeze()
+    end, {desc = 'Unfreeze current node (allow editing)'})
+
+    -- Helper function for path completion
+    local function get_valid_paths()
+        local filepath = vim.fn.expand('%:.')
+        if filepath == "" or not state.file_has_tree(filepath) then
+            return {}
+        end
+
+        local paths = {}
+        local nodes = state.walk_tree(filepath)
+
+        for _, node in ipairs(nodes) do
+            -- Format path as "A", "A.1", "A.1.1" etc
+            local path_str = table.concat(node.path, ".")
+            table.insert(paths, path_str)
+        end
+
+        return paths
+    end
+
+    vim.api.nvim_create_user_command('JJSwitch', function(opts)
+        local path = opts.args
+        if path == "" then
+            vim.notify('Usage: :JJSwitch <path> (e.g., A or A.1)', vim.log.levels.ERROR)
+            return
+        end
+        cmd_switch.switch_to_node(path)
+    end, {
+        nargs = 1,
+        desc = 'Switch to different node in tree',
+        complete = function(arg_lead, cmd_line, cursor_pos)
+            local paths = get_valid_paths()
+
+            -- Filter by what user has typed
+            if arg_lead ~= "" then
+                return vim.tbl_filter(function(path)
+                    return vim.startswith(path, arg_lead)
+                end, paths)
+            end
+
+            return paths
+        end
+    })
+
+    vim.api.nvim_create_user_command('JJTree', function()
+        cmd_tree.show_tree()
+    end, {desc = 'Show tree visualization'})
+
+    vim.api.nvim_create_user_command('JJDrift', function()
+        cmd_drift.show_drift()
+    end, {desc = 'Show drift status'})
 end
 
 local function setup_autocmds()
@@ -130,8 +247,10 @@ function M.setup(opts)
     state.set_available(true)
     local repo_root = core.find_repo()
     state.set_repo(repo_root)
+
     setup_autocmds()
     create_commands()
+    watcher.setup()
 end
 
 function M.get_state()

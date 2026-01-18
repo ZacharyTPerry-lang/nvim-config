@@ -105,7 +105,7 @@ return {
                 end
 
                 local profile = profiles.get_profile_for_buffer(bufnr, lang)
-                local success = profiles.ensure_clangd_config(root_dir, lang, profile)
+                local success = profiles.ensure_lsp_config(root_dir, lang, profile)
 
                 if success then
                     cached.profile = profile
@@ -128,7 +128,7 @@ return {
 
                 local profile_file = profiles.find_lsp_profile_file(root_dir)
                 if not profile_file then
-                    profiles.cleanup_orphaned_config(root_dir)
+                    profiles.cleanup_orphaned_config(root_dir, lang)
                 end
             end,
             init_options = {
@@ -159,6 +159,62 @@ return {
                         "-Wall",
                         "-Wextra",
                     }
+                end
+            end,
+        })
+
+        --
+        -- VHDL
+        --
+
+        -- Configure ghdl_ls for VHDL
+        vim.lsp.config('ghdl_ls', {
+            cmd = { 'ghdl-ls' },
+            filetypes = { 'vhdl' },
+            root_markers = { '.lsp-profile', '.ghdl-ls.json', '.git' },
+            capabilities = capabilities,
+            on_attach = function(client, bufnr)
+                local root_dir = client.config.root_dir
+                if not root_dir then return end
+
+                if not profiles.is_safe_project_root(root_dir) then
+                    return
+                end
+
+                local lang = "vhdl"  -- VHDL files are always VHDL
+
+                local cached = profiles.get_or_create_project_cache(root_dir)
+
+                if cached.checked then
+                    vim.b[bufnr].lsp_profile = cached.profile
+                    return
+                end
+
+                local profile = profiles.get_profile_for_buffer(bufnr, lang)
+                local success = profiles.ensure_lsp_config(root_dir, lang, profile)
+
+                if success then
+                    cached.profile = profile
+                    cached.checked = true
+                    vim.b[bufnr].lsp_profile = profile
+
+                    if profile ~= "standard" then
+                        vim.schedule(function()
+                            vim.notify(
+                                string.format("LSP Profile: %s (vhdl)", profile),
+                                vim.log.levels.INFO
+                            )
+                        end)
+                    end
+                else
+                    cached.profile = profile
+                    cached.checked = true
+                    vim.b[bufnr].lsp_profile = profile
+                end
+
+                local profile_file = profiles.find_lsp_profile_file(root_dir)
+                if not profile_file then
+                    profiles.cleanup_orphaned_config(root_dir, lang)
                 end
             end,
         })
@@ -202,6 +258,7 @@ return {
         -- Enable LSPs
         vim.lsp.enable('lua_ls')
         vim.lsp.enable('clangd')
+        vim.lsp.enable('ghdl_ls')  -- Enable VHDL LSP
         vim.lsp.enable('zls')
         vim.lsp.enable('gopls')
         vim.lsp.enable('rust_analyzer')

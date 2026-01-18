@@ -1,0 +1,11 @@
+{
+  "_comment": "NVIM LSP PROFILES - standard - TEMPLATE",
+  "options": {
+    "ghdl_analysis": [
+      "--std=08",
+      "--ieee=synopsys",
+      "-frelaxed",
+      "--workdir=work"
+    ]
+  }
+}

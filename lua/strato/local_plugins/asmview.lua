@@ -1,4 +1,4 @@
--- lua/strato/lazy/asmview.lua
+-- lua/strato/local_plugins/asmview.lua
 return {
  -- "asmview",
   name = "asmview",

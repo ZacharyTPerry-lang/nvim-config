@@ -139,8 +139,18 @@ function M.is_safe_project_root(root_dir)
     return true
 end
 
+-- Helper to get config filename for a language
+function M.get_config_filename(lang)
+    if lang == "vhdl" then
+        return ".ghdl-ls.json"
+    else
+        return ".clangd"
+    end
+end
+
 function M.read_template(lang, profile)
-    local template_path = M.get_profile_path(lang, profile) .. "/.clangd"
+    local config_filename = M.get_config_filename(lang)
+    local template_path = M.get_profile_path(lang, profile) .. "/" .. config_filename
 
     if vim.fn.filereadable(template_path) == 0 then
         return nil
@@ -155,7 +165,7 @@ function M.read_template(lang, profile)
     return content
 end
 
-function M.is_our_clangd(filepath)
+function M.is_our_config(filepath, lang)
     if vim.fn.filereadable(filepath) == 0 then
         return false, nil
     end
@@ -164,16 +174,175 @@ function M.is_our_clangd(filepath)
     if not file then return false, nil end
 
     local first_line = file:read("*l")
-    file:close()
 
-    if not first_line then return false, nil end
+    if lang == "vhdl" then
+        -- For VHDL, check for JSON comment at start
+        -- Look for: {"_comment": "NVIM LSP PROFILES - standard - TEMPLATE",
+        local content = first_line
+        -- Read more if needed to get the full JSON structure start
+        local line2 = file:read("*l")
+        if line2 then content = content .. "\n" .. line2 end
 
-    local profile = first_line:match("^# NVIM LSP PROFILES %- (%w+) %- TEMPLATE")
-    if profile then
-        return true, profile
+        file:close()
+
+        -- Extract profile from JSON comment
+        local profile = content:match('"_comment":%s*"NVIM LSP PROFILES %- (%w+) %- TEMPLATE"')
+        return profile ~= nil, profile
+    else
+        -- For C/C++, use existing logic
+        local profile = first_line:match("^# NVIM LSP PROFILES %- (%w+) %- TEMPLATE")
+
+        if not profile then
+            file:close()
+            return false, nil
+        end
+
+        -- Read until we hit the dynamic marker or EOF
+        local template_section = first_line .. "\n"
+        for line in file:lines() do
+            template_section = template_section .. line .. "\n"
+            if line:match("^# NVIM LSP PROFILES %- DYNAMIC SECTION START") then
+                break
+            end
+        end
+
+        file:close()
+        return true, profile, template_section
+    end
+end
+
+function M.extract_vendor_paths_from_makefile(root_dir)
+    local makefile = root_dir .. "/Makefile"
+    if vim.fn.filereadable(makefile) == 0 then
+        -- Try lowercase version
+        makefile = root_dir .. "/makefile"
+        if vim.fn.filereadable(makefile) == 0 then
+            return {}
+        end
     end
 
-    return false, nil
+    local vendor_paths = {}
+    local seen = {}
+
+    local file = io.open(makefile, "r")
+    if not file then return {} end
+
+    for line in file:lines() do
+        -- Look for -I flags in CFLAGS lines
+        if line:match("CFLAGS") then
+            -- Extract all -I paths from the line
+            for include_path in line:gmatch("-I(%S+)") do
+                if not seen[include_path] then
+                    seen[include_path] = true
+                    table.insert(vendor_paths, include_path)
+                end
+            end
+        end
+
+        -- Also look for := assignments with vendor paths (for other cases)
+        local var_name, path = line:match("^%s*(%w+)%s*:=%s*(.-)%s*$")
+        if path and path:match("vendor/") then
+            -- Extract the vendor directory part
+            local vendor_dir = path:match("(vendor/[^/]+)")
+            if vendor_dir and not seen[vendor_dir] then
+                -- Only add if it looks like an include directory
+                if vim.fn.isdirectory(root_dir .. "/" .. vendor_dir) == 1 then
+                    -- Check if it has header files
+                    local has_headers = false
+                    local headers = vim.fn.glob(root_dir .. "/" .. vendor_dir .. "/*.h", false, true)
+                    if #headers > 0 then
+                        has_headers = true
+                    end
+                    -- Also check include subdirectory
+                    headers = vim.fn.glob(root_dir .. "/" .. vendor_dir .. "/include/*.h", false, true)
+                    if #headers > 0 then
+                        has_headers = true
+                    end
+
+                    if has_headers and not seen[vendor_dir] then
+                        seen[vendor_dir] = true
+                        table.insert(vendor_paths, vendor_dir)
+                    end
+                end
+            end
+        end
+    end
+
+    file:close()
+
+    return vendor_paths
+end
+
+function M.ensure_ghdl_config(root_dir, profile)
+    if not M.is_safe_project_root(root_dir) then
+        return false
+    end
+
+    local template = M.read_template("vhdl", profile)
+    if not template then
+        vim.notify(
+            string.format("Template not found: vhdl/%s", profile),
+            vim.log.levels.ERROR
+        )
+        return false
+    end
+
+    local ghdl_path = root_dir .. "/.ghdl-ls.json"
+    local is_ours, existing_profile = M.is_our_config(ghdl_path, "vhdl")
+
+    if vim.fn.filereadable(ghdl_path) == 1 and not is_ours then
+        return false
+    end
+
+    local should_regenerate = false
+
+    if vim.fn.filereadable(ghdl_path) == 0 then
+        should_regenerate = true
+    elseif is_ours and existing_profile ~= profile then
+        should_regenerate = true
+    elseif is_ours then
+        local template_path = M.get_profile_path("vhdl", profile) .. "/.ghdl-ls.json"
+        local template_time = vim.fn.getftime(template_path)
+        local config_time = vim.fn.getftime(ghdl_path)
+
+        if template_time > config_time then
+            should_regenerate = true
+        end
+
+        -- Also check if Makefile changed (VHDL projects might have vendor IP)
+        local makefile_time = vim.fn.getftime(root_dir .. "/Makefile")
+        if makefile_time == -1 then
+            makefile_time = vim.fn.getftime(root_dir .. "/makefile")
+        end
+        if makefile_time > config_time then
+            should_regenerate = true
+        end
+    end
+
+    if should_regenerate then
+        -- For VHDL, we might want to add vendor libraries dynamically
+        -- For now, just write the template
+        local final_content = template
+
+        local success, err = pcall(function()
+            local file = io.open(ghdl_path, "w")
+            if not file then
+                error("Failed to open file for writing")
+            end
+            file:write(final_content)
+            file:close()
+        end)
+
+        if not success then
+            vim.notify(
+                string.format("Failed to write .ghdl-ls.json: %s", err),
+                vim.log.levels.ERROR
+            )
+            return false
+        end
+    end
+
+    return true
 end
 
 function M.ensure_clangd_config(root_dir, lang, profile)
@@ -191,7 +360,7 @@ function M.ensure_clangd_config(root_dir, lang, profile)
     end
 
     local clangd_path = root_dir .. "/.clangd"
-    local is_ours, existing_profile = M.is_our_clangd(clangd_path)
+    local is_ours, existing_profile, template_section = M.is_our_config(clangd_path, lang)
 
     if vim.fn.filereadable(clangd_path) == 1 and not is_ours then
         return false
@@ -201,9 +370,10 @@ function M.ensure_clangd_config(root_dir, lang, profile)
 
     if vim.fn.filereadable(clangd_path) == 0 then
         should_regenerate = true
-    elseif is_ours and existing_profile ~=profile then
+    elseif is_ours and existing_profile ~= profile then
         should_regenerate = true
     elseif is_ours then
+        -- Check if template changed
         local template_path = M.get_profile_path(lang, profile) .. "/.clangd"
         local template_time = vim.fn.getftime(template_path)
         local config_time = vim.fn.getftime(clangd_path)
@@ -211,15 +381,85 @@ function M.ensure_clangd_config(root_dir, lang, profile)
         if template_time > config_time then
             should_regenerate = true
         end
+
+        -- Also check if Makefile changed
+        local makefile_time = vim.fn.getftime(root_dir .. "/Makefile")
+        if makefile_time == -1 then
+            makefile_time = vim.fn.getftime(root_dir .. "/makefile")
+        end
+        if makefile_time > config_time then
+            should_regenerate = true
+        end
+
+        -- Check if template content differs from what we have
+        if template_section and template ~= template_section:sub(1, -2) then  -- Remove trailing newline for comparison
+            should_regenerate = true
+        end
     end
 
     if should_regenerate then
+        -- Build final content
+        local final_content = template
+
+        -- Check for vendor dependencies in Makefile
+        local makefile = root_dir .. "/Makefile"
+        if vim.fn.filereadable(makefile) == 0 then
+            makefile = root_dir .. "/makefile"
+        end
+        if vim.fn.filereadable(makefile) == 1 then
+            local vendor_paths = M.extract_vendor_paths_from_makefile(root_dir)
+            if #vendor_paths > 0 then
+                -- We need to inject the includes into the existing CompileFlags section
+                -- Find the CompileFlags: Add: section and append to it
+                local lines = {}
+                for line in template:gmatch("[^\n]+") do
+                    table.insert(lines, line)
+                end
+
+                -- Find where to insert (after the last Add: item)
+                local insert_index = nil
+                local in_compile_flags_add = false
+                for i, line in ipairs(lines) do
+                    if line:match("^CompileFlags:") then
+                        in_compile_flags_add = false
+                    elseif line:match("^%s+Add:") then
+                        in_compile_flags_add = true
+                    elseif in_compile_flags_add and line:match("^%s+%s+%-") then
+                        -- This is an item in the Add list
+                        insert_index = i
+                    elseif in_compile_flags_add and not line:match("^%s+%s+") then
+                        -- We've left the Add section
+                        break
+                    end
+                end
+
+                if insert_index then
+                    -- Add dynamic section marker and vendor includes
+                    table.insert(lines, insert_index + 1, "    # NVIM LSP PROFILES - DYNAMIC VENDOR INCLUDES")
+                    for j, path in ipairs(vendor_paths) do
+                        -- Make paths absolute from project root
+                        table.insert(lines, insert_index + 1 + j, "    - -I" .. root_dir .. "/" .. path)
+                    end
+                    final_content = table.concat(lines, "\n")
+                else
+                    -- Fallback: append as before if we can't find the right spot
+                    final_content = template .. "\n# NVIM LSP PROFILES - DYNAMIC SECTION START\n"
+                    final_content = final_content .. "# Auto-detected vendor includes from Makefile\n"
+                    final_content = final_content .. "CompileFlags:\n  Add:\n"
+
+                    for _, path in ipairs(vendor_paths) do
+                        final_content = final_content .. "    - -I" .. path .. "\n"
+                    end
+                end
+            end
+        end
+
         local success, err = pcall(function()
             local file = io.open(clangd_path, "w")
             if not file then
                 error("Failed to open file for writing")
             end
-            file:write(template)
+            file:write(final_content)
             file:close()
         end)
 
@@ -235,20 +475,30 @@ function M.ensure_clangd_config(root_dir, lang, profile)
     return true
 end
 
-function M.cleanup_orphaned_config(root_dir)
-    local clangd_path = root_dir .. "/.clangd"
-    local is_ours, _ = M.is_our_clangd(clangd_path)
+-- Main dispatcher function
+function M.ensure_lsp_config(root_dir, lang, profile)
+    if lang == "vhdl" then
+        return M.ensure_ghdl_config(root_dir, profile)
+    else
+        -- C/C++/OpenCL use clangd
+        return M.ensure_clangd_config(root_dir, lang, profile)
+    end
+end
+
+function M.cleanup_orphaned_config(root_dir, lang)
+    local config_filename = M.get_config_filename(lang)
+    local config_path = root_dir .. "/" .. config_filename
+    local is_ours, _ = M.is_our_config(config_path, lang)
 
     if is_ours then
         local profile_file = M.find_lsp_profile_file(root_dir)
         if not profile_file then
             pcall(function()
-                os.remove(clangd_path)
-        end)
+                os.remove(config_path)
+            end)
+        end
     end
 end
-end
-
 
 function M.get_or_create_project_cache(root_dir)
     if not project_cache[root_dir] then
@@ -297,8 +547,53 @@ function M.detect_header_language(root_dir, bufnr)
         end
     end
 
-    -- Default to C for headers if no other indication it is doomed
+    -- Default to C for headers if no other indication
     return "c"
+end
+
+-- Helper to detect active LSP client and language
+function M.detect_active_lsp_for_buffer(bufnr)
+    local clients = vim.lsp.get_clients({ bufnr = bufnr })
+    if #clients == 0 then
+        return nil, nil, nil
+    end
+
+    -- Priority order for known LSPs
+    local lsp_priority = {
+        clangd = { langs = {"c", "cpp", "opencl", "objc", "objcpp"} },
+        ghdl_ls = { langs = {"vhdl"} }
+    }
+
+    for _, client in ipairs(clients) do
+        local client_info = lsp_priority[client.name]
+        if client_info and client.config.root_dir then
+            -- Determine language based on filetype
+            local ft = vim.bo[bufnr].filetype
+
+            -- Special handling for headers
+            if ft == "c" or ft == "cpp" then
+                local detected_ft = M.detect_header_language(client.config.root_dir, bufnr)
+                ft = detected_ft
+            end
+
+            -- Map filetype to our language
+            local lang_map = {
+                c = "c",
+                cpp = "cpp",
+                opencl = "opencl",
+                objc = "c",
+                objcpp = "cpp",
+                vhdl = "vhdl"
+            }
+
+            local lang = lang_map[ft]
+            if lang then
+                return client, client.config.root_dir, lang
+            end
+        end
+    end
+
+    return nil, nil, nil
 end
 
 --
@@ -378,160 +673,132 @@ function M.setup_command()
         desc = "Show available LSP profiles"
     })
 
-    -- second command :LspProfileReload - forces a regeneration of the releated clangd file
+    -- second command :LspProfileReload - forces a regeneration of the config file
     vim.api.nvim_create_user_command("LspProfileReload", function()
         local bufnr = vim.api.nvim_get_current_buf()
-        local clients = vim.lsp.get_clients({ bufnr = bufnr })
+        local client, root_dir, lang = M.detect_active_lsp_for_buffer(bufnr)
 
-        if #clients == 0 then
-            vim.notify("No LSP client attatched to the current buffer", vim.log.levels.WARN)
+        if not client then
+            vim.notify("No LSP client attached to the current buffer", vim.log.levels.WARN)
             return
-        end
-
-        local root_dir = nil
-        for _, client in ipairs(clients) do
-            if client.name == "clangd" and client.config.root_dir then
-                root_dir = client.config.root_dir
-                break
-            end
         end
 
         if not root_dir then
-            vim.notify("No clang root directory found", vim.log.levels.WARN)
+            vim.notify("No project root directory found", vim.log.levels.WARN)
             return
         end
 
-        --Clear the cache right here
+        -- Clear the cache
         project_cache[root_dir] = nil
 
-        --clear the buffer
+        -- Clear the buffer
         vim.b[bufnr].lsp_profile = nil
 
-        -- get lang and attempt a regenerate
-        local detected_ft = M.detect_header_language(root_dir, bufnr)
-        local lang_map = { c = "c", cpp = "cpp", opencl = "opencl", objc = "c", objcpp = "cpp" }
-        local lang = lang_map[detected_ft] or "c"
+        -- Get profile and regenerate
         local profile = M.get_profile_for_buffer(bufnr, lang)
-        local success = M.ensure_clangd_config(root_dir, lang, profile)
+        local success = M.ensure_lsp_config(root_dir, lang, profile)
 
         if success then
             vim.notify(
                 string.format("Reloaded profile: %s (%s)", profile, lang),
                 vim.log.levels.INFO
             )
-            -- Pull start the LSP
-            vim.cmd("LspRestart clangd")
+            -- Restart the LSP
+            vim.cmd("LspRestart " .. client.name)
         else
             vim.notify("Failed to reload profile", vim.log.levels.ERROR)
         end
     end, {
-        desc = "Force regenerate clangd for current project"
+        desc = "Force regenerate LSP config for current project"
         }
     )
 
-    -- Command :LspProfileClean - remove an autogenerated clangd
+    -- Command :LspProfileClean - remove an autogenerated config
     vim.api.nvim_create_user_command("LspProfileClean", function()
         local bufnr = vim.api.nvim_get_current_buf()
-        local clients = vim.lsp.get_clients({ bufnr = bufnr })
+        local client, root_dir, lang = M.detect_active_lsp_for_buffer(bufnr)
 
-        if #clients == 0 then
-            vim.notify("No LSP client attatched to current buffer", vim.log.levels.WARN)
+        if not client then
+            vim.notify("No LSP client attached to current buffer", vim.log.levels.WARN)
             return
-        end
-
-        local root_dir = nil
-        for _, client in ipairs(clients) do
-            if client.name == "clangd" and client.config.root_dir then
-                root_dir = client.config.root_dir
-                break
-            end
         end
 
         if not root_dir then
-            vim.notify("No clangd root directory found", vim.log.levels.WARN)
+            vim.notify("No project root directory found", vim.log.levels.WARN)
             return
         end
 
-        local clangd_path = root_dir .. "/.clangd"
-        local is_ours, profile = M.is_our_clangd(clangd_path)
+        local config_filename = M.get_config_filename(lang)
+        local config_path = root_dir .. "/" .. config_filename
+        local is_ours, profile = M.is_our_config(config_path, lang)
 
         if not is_ours then
-            vim.notify("clangd not generated by profile system", vim.log.levels.WARN)
+            vim.notify(config_filename .. " not generated by profile system", vim.log.levels.WARN)
             return
         end
 
-        --kill it
+        -- Remove it
         local success = pcall(function()
-            os.remove(clangd_path)
+            os.remove(config_path)
         end)
 
         if success then
             project_cache[root_dir] = nil
-            vim.notify("Removed generated clangd", vim.log.levels.INFO)
+            vim.notify("Removed generated " .. config_filename, vim.log.levels.INFO)
         else
-            vim.notify("Failed to remove clangd", vim.log.levels.ERROR)
+            vim.notify("Failed to remove " .. config_filename, vim.log.levels.ERROR)
         end
     end, {
-        desc = "Remove generated clangd from current project"
+        desc = "Remove generated LSP config from current project"
         }
     )
 
-    -- command : LspProfileInfo - LspInfo but better
+    -- command : LspProfileInfo - LSP info but better
     vim.api.nvim_create_user_command("LspProfileInfo", function()
         local bufnr = vim.api.nvim_get_current_buf()
-        local clients = vim.lsp.get_clients({ bufnr = bufnr })
+        local client, root_dir, lang = M.detect_active_lsp_for_buffer(bufnr)
 
-        if #clients == 0 then
-            vim.notify("No LSP client attatched to current buffer", vim.log.levels.WARN)
+        if not client then
+            vim.notify("No LSP client attached to current buffer", vim.log.levels.WARN)
             return
-        end
-
-        local root_dir = nil
-        for _, client in ipairs(clients) do
-            if client.name == "clangd" and client.config.root_dir then
-                root_dir = client.config.root_dir
-                break
-            end
         end
 
         if not root_dir then
-            vim.notify("No clangd root directory found", vim.log.levels.WARN)
+            vim.notify("No project root directory found", vim.log.levels.WARN)
             return
         end
 
-        local detected_ft = M.detect_header_language(root_dir, bufnr)
-        local lang_map = { c = "c", cpp = "cpp", opencl = "opencl", objc = "c", objcpp = "cpp" }
-        local lang = lang_map[detected_ft] or "c"
-
         local profile = vim.b[bufnr].lsp_profile or "unknown"
 
-        local clangd_path = root_dir .. "/.clangd"
-        local clangd_status = "does not exist"
-        local is_ours, existing_profile = M.is_our_clangd(clangd_path)
+        local config_filename = M.get_config_filename(lang)
+        local config_path = root_dir .. "/" .. config_filename
+        local config_status = "does not exist"
+        local is_ours, existing_profile = M.is_our_config(config_path, lang)
 
-        if vim.fn.filereadable(clangd_path) == 1 then
+        if vim.fn.filereadable(config_path) == 1 then
             if is_ours then
-                clangd_status = string.format("generated (profile: %s)", existing_profile)
-                local timestamp = vim.fn.getftime(clangd_path)
+                config_status = string.format("generated (profile: %s)", existing_profile)
+                local timestamp = vim.fn.getftime(config_path)
                 local date = os.date("%Y-%m-%d %H:%M:%S", timestamp)
-                clangd_status = clangd_status .. string.format("\n Last Modified: %s", date)
+                config_status = config_status .. string.format("\n Last Modified: %s", date)
             else
-                clangd_status = "user-mangaged (not made by the profile system)"
+                config_status = "user-managed (not made by the profile system)"
             end
         end
 
-        local template_path = M.get_profile_path(lang, profile) .. "/.clangd"
+        local template_path = M.get_profile_path(lang, profile) .. "/" .. config_filename
         local template_exists = vim.fn.filereadable(template_path) == 1
 
         local info = {
             "LSP Profile Information:",
             "",
+            " LSP Server: " .. client.name,
             " Language: " .. lang,
             " Profile: " .. profile,
             " Project Root: " .. root_dir,
             " Template Path: " .. template_path,
             " Template Exists: " .. (template_exists and "yes" or "no"),
-            " .clangd status: " .. clangd_status,
+            " " .. config_filename .. " status: " .. config_status,
         }
 
         vim.notify(table.concat(info, "\n"), vim.log.levels.INFO)
@@ -542,4 +809,3 @@ function M.setup_command()
 end
 
 return M
-

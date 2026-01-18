@@ -1,4 +1,5 @@
--- Build and run system for programming languages
+-- Build and run system with LSP profile integration
+-- lua/strato/local_plugins/asmview.lua
 
 return {
     "compile-pipeline",
@@ -7,6 +8,7 @@ return {
     event = "VeryLazy",
     config = function()
         local Pipeline = {}
+        local profiles = require("strato.lsp.profiles")
 
         -- Track state
         local output_buffer = nil
@@ -14,11 +16,85 @@ return {
         local active_job = nil
         local saved_arguments = ""
 
+        -- Parse .clangd file to extract compile flags
+        local function parse_clangd_flags(clangd_path)
+            if vim.fn.filereadable(clangd_path) == 0 then
+                return nil
+            end
+
+            local file = io.open(clangd_path, "r")
+            if not file then return nil end
+
+            local content = file:read("*a")
+            file:close()
+
+            -- Extract CompileFlags section
+            local compile_flags = content:match("CompileFlags:%s*\n(.-)\n%S")
+            if not compile_flags then return nil end
+
+            -- Extract Add section
+            local add_section = compile_flags:match("Add:%s*%[(.-)%]")
+            if not add_section then return nil end
+
+            -- Parse flags into a table
+            local flags = {}
+            for flag in add_section:gmatch('"([^"]+)"') do
+                table.insert(flags, flag)
+            end
+
+            return flags
+        end
+
+        -- Get compile flags for current project
+        local function get_project_compile_flags(source_file)
+            local bufnr = vim.api.nvim_get_current_buf()
+            local clients = vim.lsp.get_clients({ bufnr = bufnr })
+
+            local root_dir = nil
+            for _, client in ipairs(clients) do
+                if client.name == "clangd" and client.config.root_dir then
+                    root_dir = client.config.root_dir
+                    break
+                end
+            end
+
+            if not root_dir then
+                -- Fallback: search for .clangd in parent directories
+                local dir = vim.fn.fnamemodify(source_file, ":h")
+                for _ = 1, 10 do
+                    local clangd_path = dir .. "/.clangd"
+                    if vim.fn.filereadable(clangd_path) == 1 then
+                        root_dir = dir
+                        break
+                    end
+                    local parent = vim.fn.fnamemodify(dir, ":h")
+                    if parent == dir then break end
+                    dir = parent
+                end
+            end
+
+            if root_dir then
+                local clangd_path = root_dir .. "/.clangd"
+                return parse_clangd_flags(clangd_path)
+            end
+
+            return nil
+        end
+
         -- Language-specific build rules
         local languages = {
             c = {
                 compile_command = function(source_file, binary_output)
-                    return string.format("clang -o %s %s -O0 -std=c99 -Wall", binary_output, source_file)
+                    local flags = get_project_compile_flags(source_file)
+
+                    if flags then
+                        -- Use project-specific flags from .clangd
+                        local flags_str = table.concat(flags, " ")
+                        return string.format("clang -o %s %s %s", binary_output, source_file, flags_str)
+                    else
+                        -- Fallback to defaults
+                        return string.format("clang -o %s %s -O0 -std=c99 -Wall", binary_output, source_file)
+                    end
                 end,
                 run_command = function(binary_output, user_args)
                     return string.format("%s %s", binary_output, user_args)
@@ -28,7 +104,35 @@ return {
 
             cpp = {
                 compile_command = function(source_file, binary_output)
-                    return string.format("clang++ -o %s %s -O0 -std=c++17 -Wall", binary_output, source_file)
+                    local flags = get_project_compile_flags(source_file)
+
+                    if flags then
+                        -- Use project-specific flags from .clangd
+                        local flags_str = table.concat(flags, " ")
+                        return string.format("clang++ -o %s %s %s", binary_output, source_file, flags_str)
+                    else
+                        -- Fallback to defaults
+                        return string.format("clang++ -o %s %s -O0 -std=c++17 -Wall", binary_output, source_file)
+                    end
+                end,
+                run_command = function(binary_output, user_args)
+                    return string.format("%s %s", binary_output, user_args)
+                end,
+                requires_compilation = true,
+            },
+
+            opencl = {
+                compile_command = function(source_file, binary_output)
+                    local flags = get_project_compile_flags(source_file)
+
+                    if flags then
+                        -- Use project-specific flags from .clangd
+                        local flags_str = table.concat(flags, " ")
+                        return string.format("clang -o %s %s %s", binary_output, source_file, flags_str)
+                    else
+                        -- Fallback to OpenCL defaults
+                        return string.format("clang -o %s %s -xc -std=c99 -O0 -Dcl_clang_storage_class_specifiers", binary_output, source_file)
+                    end
                 end,
                 run_command = function(binary_output, user_args)
                     return string.format("%s %s", binary_output, user_args)
@@ -60,9 +164,9 @@ return {
                 requires_compilation = false,
             },
 
-            sass = {
+            zig = {
                 compile_command = function(source_file, binary_output)
-                    return string.format("sass-compiler %s -o %s", source_file, binary_output)
+                    return string.format("zig build-exe %s -femit-bin=%s", source_file, binary_output)
                 end,
                 run_command = function(binary_output, user_args)
                     return string.format("%s %s", binary_output, user_args)
@@ -123,6 +227,23 @@ return {
             end)
         end
 
+        -- Show which profile is being used
+        local function show_profile_info(source_file)
+            local bufnr = vim.api.nvim_get_current_buf()
+            local profile = vim.b[bufnr].lsp_profile
+
+            if profile and profile ~= "standard" then
+                local flags = get_project_compile_flags(source_file)
+                if flags then
+                    append_to_output({
+                        "=== USING LSP PROFILE: " .. profile .. " ===",
+                        "Flags: " .. table.concat(flags, " "),
+                        ""
+                    }, false)
+                end
+            end
+        end
+
         -- Run compilation
         function Pipeline.compile_file()
             local source_file = vim.fn.expand("%:p")
@@ -145,6 +266,7 @@ return {
             local compile_cmd = lang.compile_command(source_file, binary_output)
 
             append_to_output({"=== COMPILING ===", "$ " .. compile_cmd, ""}, true)
+            show_profile_info(source_file)
 
             if active_job then
                 vim.fn.jobstop(active_job)
@@ -221,6 +343,7 @@ return {
 
                 if binary_modified < source_modified or binary_modified == -1 then
                     append_to_output({"=== COMPILING FIRST ===", ""}, true)
+                    show_profile_info(source_file)
 
                     local compile_cmd = lang.compile_command(source_file, binary_output)
                     append_to_output({"$ " .. compile_cmd, ""}, false)
