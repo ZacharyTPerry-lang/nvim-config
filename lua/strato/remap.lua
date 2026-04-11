@@ -70,13 +70,17 @@ end, {expr = true, desc = "Continue comment on new line"})
 
 -- Harpoon config (Miryoku-compatible, all base layer)
 vim.keymap.set("n", "<leader>a", function() require("harpoon"):list():add() end, {desc = "Harpoon add"})
-vim.keymap.set("n", "<C-e>", function() require("harpoon").ui:toggle_quick_menu(require("harpoon"):list()) end)  -- Keep for now, evaluate
+vim.keymap.set("n", "<leader>s", function() require("harpoon").ui:toggle_quick_menu(require("harpoon"):list()) end, {desc = "Harpoon menu"})
 vim.keymap.set("n", "<leader>j", function() require("harpoon"):list():select(1) end, {desc = "Harpoon file 1"})
 vim.keymap.set("n", "<leader>k", function() require("harpoon"):list():select(2) end, {desc = "Harpoon file 2"})
 vim.keymap.set("n", "<leader>l", function() require("harpoon"):list():select(3) end, {desc = "Harpoon file 3"})
 vim.keymap.set("n", "<leader>'", function() require("harpoon"):list():select(4) end, {desc = "Harpoon file 4"})
 vim.keymap.set("n", "<leader>hp", function() require("harpoon"):list():prev() end, {desc = "Harpoon prev"})
-vim.keymap.set("n", "<leader>hn", function() require("harpoon"):list():next() end, {desc = "Harpoon next"})--
+vim.keymap.set("n", "<leader>hn", function() require("harpoon"):list():next() end, {desc = "Harpoon next"})
+
+-- Project list (persistent, right hand: i/o)
+vim.keymap.set("n", "<leader>i", function() require("harpoon"):list("project"):add() end, {desc = "Project list add"})
+vim.keymap.set("n", "<leader>o", function() require("harpoon").ui:toggle_quick_menu(require("harpoon"):list("project")) end, {desc = "Project list menu"})
 
 -- Telescope Enhanced Navigation
 --
