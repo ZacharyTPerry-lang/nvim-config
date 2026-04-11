@@ -34,6 +34,7 @@ require("lazy").setup({
     { import = "strato.lazy" },
     { import = "strato.local_plugins" },
   },
+  rocks = { enabled = false },
   change_detection = {
     enabled = false,
     notify = false
