@@ -1,6 +1,7 @@
 require("strato.set")
 require("strato.remap")
 require("strato.lazy_init")
+require("strato.snippets_init")
 
 -- Augroups and autocmds
 local augroup = vim.api.nvim_create_augroup

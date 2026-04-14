@@ -2,6 +2,12 @@
 vim.g.mapleader = " "
 vim.keymap.set("n", "<leader>f", vim.cmd.Ex)
 
+-- Here we fix nvim pasting of windows to linux, or dos to unix
+vim.cmd([[
+    nmenu 500 PopUp.Paste <Cmd>lua vim.fn.setreg('+', vim.fn.getreg('+'):gsub('\r', '')); vim.cmd('normal! "+gP')<CR>
+    vmenu 500 PopUp.Paste <Cmd>lua vim.fn.setreg('+', vim.fn.getreg('+'):gsub('\r', '')); vim.cmd('normal! "+P')<CR>
+]])
+
 --
 -- Smart tab indentation functions
 --

@@ -21,6 +21,7 @@ vim.opt.updatetime = 50
 vim.opt.colorcolumn = ""
 vim.opt.timeoutlen = 300
 vim.opt.ttimeoutlen = 10
+vim.opt.fixendofline = true
 
 vim.api.nvim_create_autocmd("BufEnter", {
     callback = function()
